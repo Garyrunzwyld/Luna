@@ -1,6 +1,6 @@
-# Publishes a Luna release. Claude pushes the installer (in pieces, because GitHub
-# limits files to 100 MB) to a branch named upload/vX.Y.Z; this joins the pieces,
-# creates the release that installed copies of Luna update from, then deletes the branch.
+# Publishes a Luna release. Claude pushes files (big ones in pieces, because GitHub limits files to
+# 100 MB) to a branch named upload/<tag>-<n>; this joins the pieces, checks them, creates the release
+# (or adds the files to it if it already exists) and deletes the branch.
 name: Publish release
 on:
   push:
@@ -12,21 +12,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          lfs: false
-      - name: Join installer and publish
+      - name: Join files and publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          TAG="${GITHUB_REF_NAME#upload/}"
           cd release
-          cat installer.part* > "$(cat installer.name)"
-          sha512sum -c installer.sha512
-          FILES="$(cat installer.name) latest.yml"
-          [ -f latest-mac.yml ] && FILES="$FILES latest-mac.yml"
-          [ -f "$(cat installer.name).blockmap" ] && FILES="$FILES $(cat installer.name).blockmap"
-          gh release create "$TAG" $FILES --repo "$GITHUB_REPOSITORY" --title "Luna ${TAG#v}" --notes-file notes.md
+          TAG="$(cat tag.txt)"
+          for p in *.part00; do [ -e "$p" ] || continue; b="${p%.part00}"; cat "$b".part* > "$b"; rm "$b".part*; done
+          sha512sum -c checksums.sha512
+          FILES="$(ls | grep -v -e '^notes.md$' -e '^tag.txt$' -e '^checksums.sha512$')"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" $FILES --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" $FILES --repo "$GITHUB_REPOSITORY" --title "Luna ${TAG#v}" --notes-file notes.md
+          fi
       - name: Remove upload branch
         if: always()
         env:
